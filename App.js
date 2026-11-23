@@ -22,8 +22,10 @@ const OLD_STORAGE_KEY = 'michinoeki-native-v1';
 const THEME_KEY = 'michinoeki-native-theme';
 
 const PREFS = [];
+const PREF_TOTAL = {};
 for (const s of STATIONS) {
   if (!PREFS.includes(s.pref)) PREFS.push(s.pref);
+  PREF_TOTAL[s.pref] = (PREF_TOTAL[s.pref] || 0) + 1;
 }
 
 function stationKey(name, pref) {
@@ -70,17 +72,18 @@ function convertOldRecords(records) {
 }
 
 // バックアップJSON（Web版互換）を entries 配列に変換。失敗したら null
+// 日付不明の記録（date なし）は date:'' として取り込む
 function parseBackup(text) {
   try {
     const d = JSON.parse(text);
     if (d && Array.isArray(d.entries)) {
       return d.entries
-        .filter((e) => e && e.name && e.pref && e.date)
+        .filter((e) => e && e.name && e.pref)
         .map((e) => ({
-          id: e.id || 'imp-' + e.pref + '-' + e.name + '-' + e.date,
+          id: e.id || 'imp-' + e.pref + '-' + e.name + '-' + (e.date || 'unknown'),
           name: e.name,
           pref: e.pref,
-          date: e.date,
+          date: e.date || '',
           memo: e.memo || '',
         }));
     }
@@ -90,6 +93,34 @@ function parseBackup(text) {
     return null;
   }
   return null;
+}
+
+// 都道府県ごとの訪問済み駅数
+function visitedByPref(entries) {
+  const map = {};
+  for (const e of entries) {
+    if (!map[e.pref]) map[e.pref] = new Set();
+    map[e.pref].add(e.name);
+  }
+  return map;
+}
+
+// 完全制覇した都道府県の数（その県の全駅を訪問）
+function countConquered(entries) {
+  const byPref = visitedByPref(entries);
+  let n = 0;
+  for (const p of PREFS) {
+    if (byPref[p] && PREF_TOTAL[p] && byPref[p].size >= PREF_TOTAL[p]) n += 1;
+  }
+  return n;
+}
+
+// 都道府県別の進み具合（訪問のある県だけ、進み具合の高い順）
+function prefProgress(entries) {
+  const byPref = visitedByPref(entries);
+  return PREFS.filter((p) => byPref[p])
+    .map((p) => ({ pref: p, got: byPref[p].size, total: PREF_TOTAL[p] || 0 }))
+    .sort((a, b) => b.got / b.total - a.got / a.total || b.got - a.got);
 }
 
 export default function App() {
@@ -140,27 +171,29 @@ export default function App() {
     const map = {};
     for (const e of entries) {
       const k = stationKey(e.name, e.pref);
-      if (!map[k]) map[k] = { count: 0, last: '', hasToday: false };
+      if (!map[k]) map[k] = { count: 0, last: '', hasToday: false, hasUnknown: false };
       map[k].count += 1;
-      if (e.date > map[k].last) map[k].last = e.date;
-      if (e.date === today) map[k].hasToday = true;
+      if (e.date) {
+        if (e.date > map[k].last) map[k].last = e.date;
+        if (e.date === today) map[k].hasToday = true;
+      } else {
+        map[k].hasUnknown = true;
+      }
     }
     return map;
   }, [entries, today]);
 
   const visitedCount = Object.keys(stationStats).length;
-  const conqueredPrefs = useMemo(() => {
-    const set = new Set();
-    for (const e of entries) set.add(e.pref);
-    return set.size;
-  }, [entries]);
+  const conquered = useMemo(() => countConquered(entries), [entries]);
+  const progress = useMemo(() => prefProgress(entries), [entries]);
 
   const lastDate = useMemo(() => {
     let last = '';
-    for (const e of entries) if (e.date > last) last = e.date;
+    for (const e of entries) if (e.date && e.date > last) last = e.date;
     return last;
   }, [entries]);
   const since = daysSince(lastDate);
+  const lastLabel = !lastDate ? '—' : since === 0 ? '今日' : since + '日前';
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -172,8 +205,7 @@ export default function App() {
   }, [query, prefFilter]);
 
   function toggleStation(station) {
-    const k = stationKey(station.name, station.pref);
-    const st = stationStats[k];
+    const st = stationStats[stationKey(station.name, station.pref)];
     if (st && st.hasToday) {
       setEntries((prev) =>
         prev.filter(
@@ -230,29 +262,78 @@ export default function App() {
 
   const styles = useMemo(() => makeStyles(C), [C]);
 
+  function renderProgress() {
+    if (progress.length === 0) return null;
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>都道府県別の進み具合</Text>
+        {progress.map((r) => {
+          const full = r.total > 0 && r.got >= r.total;
+          const pct = r.total ? Math.min(100, Math.round((r.got / r.total) * 100)) : 0;
+          return (
+            <View key={r.pref} style={styles.prow}>
+              <View style={styles.ptop}>
+                <Text style={styles.prowName}>
+                  {r.pref}
+                  {full ? ' 🏆' : ''}
+                </Text>
+                <Text style={styles.prowCount}>
+                  {r.got} / {r.total}駅{full ? ' 完全制覇！' : ''}
+                </Text>
+              </View>
+              <View style={styles.barTrack}>
+                <View
+                  style={[
+                    styles.barFill,
+                    { width: pct + '%', backgroundColor: full ? C.barFull : C.barFill },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
   function renderItem({ item }) {
     const st = stationStats[stationKey(item.name, item.pref)];
     const visited = !!st;
     return (
       <TouchableOpacity
-        style={[styles.row, visited && styles.rowVisited]}
+        style={styles.stationCard}
         onPress={() => toggleStation(item)}
         activeOpacity={0.7}
       >
         <View style={styles.rowText}>
-          <Text style={styles.name}>{item.name}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>{item.name}</Text>
+          </View>
+          <View style={styles.badgeRow}>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{item.pref}</Text>
+            </View>
+            {visited && st.count > 1 ? (
+              <View style={styles.badgeGold}>
+                <Text style={styles.badgeGoldText}>通算{st.count}回</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={styles.sub}>
-            {item.pref}
-            {visited ? ' ・ ' + st.count + '回訪問 ・ 最終 ' + st.last : ''}
+            {visited
+              ? st.last
+                ? '最終訪問 ' + st.last
+                : '日付不明の記録'
+              : 'まだ行ってない'}
           </Text>
         </View>
         {st && st.hasToday ? (
-          <View style={styles.badgeDone}>
-            <Text style={styles.badgeDoneText}>✓ 今日</Text>
+          <View style={styles.btnDone}>
+            <Text style={styles.btnDoneText}>✓ 今日</Text>
           </View>
         ) : (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>チェックイン</Text>
+          <View style={styles.btnCheckin}>
+            <Text style={styles.btnCheckinText}>チェックイン</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -264,19 +345,44 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.title}>道の駅チェックイン</Text>
-          <TouchableOpacity style={styles.gearBtn} onPress={() => setSettingsOpen(true)}>
-            <Text style={styles.gearText}>⚙ 設定</Text>
+          <TouchableOpacity style={styles.subBtn} onPress={() => setSettingsOpen(true)}>
+            <Text style={styles.subBtnText}>⚙ 設定</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.count}>
-          訪問駅数 {visitedCount} / {STATIONS.length}
+        <Text style={styles.tagline}>
+          立ち寄った道の駅を記録して、制覇を目指そう。全国{STATIONS.length}駅収録。
         </Text>
-        <Text style={styles.stats}>
-          都道府県 {conqueredPrefs} / {PREFS.length} 制覇
-          {lastDate
-            ? ' ・ 前回の訪問 ' + lastDate + (since !== null ? '（' + since + '日前）' : '')
-            : ''}
-        </Text>
+        <View style={styles.statsCard}>
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>訪問駅数</Text>
+              <Text style={styles.statNum}>
+                {visitedCount}
+                <Text style={styles.statUnit}> / {STATIONS.length}</Text>
+              </Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>訪問回数</Text>
+              <Text style={styles.statNum}>
+                {entries.length}
+                <Text style={styles.statUnit}> 回</Text>
+              </Text>
+            </View>
+          </View>
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>完全制覇した都道府県</Text>
+              <Text style={styles.statNum}>
+                {conquered}
+                <Text style={styles.statUnit}> / {PREFS.length}</Text>
+              </Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>前回の訪問から</Text>
+              <Text style={styles.statNum}>{lastLabel}</Text>
+            </View>
+          </View>
+        </View>
         <TextInput
           style={styles.search}
           placeholder="駅名・よみ・都道府県で検索"
@@ -302,55 +408,57 @@ export default function App() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <Text style={styles.hint}>
-          駅をタップすると今日の日付でチェックイン（もう一度タップで取り消し）
-        </Text>
       </View>
       <FlatList
         data={filtered}
         keyExtractor={(item) => stationKey(item.name, item.pref)}
         renderItem={renderItem}
+        ListHeaderComponent={renderProgress}
         ListEmptyComponent={
           <Text style={styles.empty}>条件に合う駅がありません</Text>
         }
+        contentContainerStyle={styles.listContent}
       />
       <Modal visible={settingsOpen} animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
         <SafeAreaView style={styles.container}>
-          <View style={styles.modalBody}>
+          <ScrollView contentContainerStyle={styles.modalBody}>
             <Text style={styles.modalTitle}>設定・バックアップ</Text>
-            <Text style={styles.note}>
-              記録はこの端末の中にだけ保存されます。機種変更などで消えないよう、ときどき書き出して保管してください。Web版のバックアップも読み込めます。
-            </Text>
-            <TouchableOpacity style={styles.actionBtn} onPress={exportBackup}>
-              <Text style={styles.actionText}>⬇️ バックアップを書き出す</Text>
-            </TouchableOpacity>
-            <Text style={styles.label}>バックアップを読み込む（下に貼り付け）</Text>
-            <TextInput
-              style={styles.importBox}
-              placeholder="ここにバックアップの文章を貼り付け"
-              placeholderTextColor={C.muted}
-              value={importText}
-              onChangeText={setImportText}
-              multiline
-            />
-            <TouchableOpacity style={styles.actionBtn} onPress={importBackup}>
-              <Text style={styles.actionText}>⬆️ 読み込む（今の記録と置き換え）</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtn} onPress={toggleTheme}>
-              <Text style={styles.actionText}>
-                {dark ? '☀️ ライトモードにする' : '🌙 ダークモードにする'}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>バックアップ</Text>
+              <Text style={styles.note}>
+                記録はこの端末の中にだけ保存されます。機種変更などで消えないよう、ときどき書き出して保管してください。Web版のバックアップも読み込めます。
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.closeBtn]}
-              onPress={() => setSettingsOpen(false)}
-            >
-              <Text style={styles.actionText}>閉じる</Text>
+              <TouchableOpacity style={styles.primaryBtn} onPress={exportBackup}>
+                <Text style={styles.primaryBtnText}>⬇️ バックアップを書き出す</Text>
+              </TouchableOpacity>
+              <Text style={styles.label}>バックアップを読み込む（下に貼り付け）</Text>
+              <TextInput
+                style={styles.importBox}
+                placeholder="ここにバックアップの文章を貼り付け"
+                placeholderTextColor={C.muted}
+                value={importText}
+                onChangeText={setImportText}
+                multiline
+              />
+              <TouchableOpacity style={styles.subBtnWide} onPress={importBackup}>
+                <Text style={styles.subBtnText}>⬆️ 読み込む（今の記録と置き換え）</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>表示</Text>
+              <TouchableOpacity style={styles.subBtnWide} onPress={toggleTheme}>
+                <Text style={styles.subBtnText}>
+                  {dark ? '☀️ ライトモードにする' : '🌙 ダークモードにする'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setSettingsOpen(false)}>
+              <Text style={styles.primaryBtnText}>閉じる</Text>
             </TouchableOpacity>
             <Text style={styles.note}>
               駅データは国土交通省「道の駅」一覧（2026年9月4日現在・全1,234駅）をもとに作成しています。制作：Happy Monster Select
             </Text>
-          </View>
+          </ScrollView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -358,140 +466,216 @@ export default function App() {
 }
 
 const LIGHT = {
-  bg: '#ffffff',
-  text: '#111111',
-  muted: '#777777',
-  border: '#e3e3e3',
+  page: '#faf8fc',
+  card: '#ffffff',
+  border: '#ece4f6',
+  text: '#332b47',
+  muted: '#776d89',
+  statBg: '#f4edff',
+  statNum: '#7247bc',
+  primary: '#8656cf',
+  subBg: '#e9e1f7',
+  subText: '#5b4390',
+  badgeBg: '#f4edff',
+  badgeText: '#7247bc',
+  goldBg: '#fff3cf',
+  goldText: '#9a6b00',
+  barTrack: '#f0eaf9',
+  barFill: '#8656cf',
+  barFull: '#e6a817',
   inputBg: '#ffffff',
-  visitedBg: '#eef7ee',
-  chipBg: '#f0f0f0',
-  chipText: '#333333',
-  chipActiveBg: '#2e7d32',
-  chipActiveText: '#ffffff',
-  badgeBorder: '#2e7d32',
-  badgeText: '#2e7d32',
-  btnBg: '#f0f0f0',
+  chipBg: '#eee9f7',
 };
 
 const DARK = {
-  bg: '#121212',
-  text: '#f0f0f0',
-  muted: '#999999',
-  border: '#333333',
-  inputBg: '#1e1e1e',
-  visitedBg: '#1d2b1d',
-  chipBg: '#262626',
-  chipText: '#dddddd',
-  chipActiveBg: '#2e7d32',
-  chipActiveText: '#ffffff',
-  badgeBorder: '#66bb6a',
-  badgeText: '#66bb6a',
-  btnBg: '#262626',
+  page: '#17131f',
+  card: '#241c33',
+  border: '#3a2f52',
+  text: '#f2eefc',
+  muted: '#a79bbb',
+  statBg: '#2e2444',
+  statNum: '#c4aef0',
+  primary: '#8656cf',
+  subBg: '#3a2f52',
+  subText: '#d9ccf5',
+  badgeBg: '#2e2444',
+  badgeText: '#c4aef0',
+  goldBg: '#4a3a10',
+  goldText: '#ffd968',
+  barTrack: '#17131f',
+  barFill: '#8656cf',
+  barFull: '#e6a817',
+  inputBg: '#241c33',
+  chipBg: '#2e2444',
 };
 
 function makeStyles(C) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: C.bg },
-    header: {
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: 8,
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
-    },
+    container: { flex: 1, backgroundColor: C.page },
+    header: { paddingHorizontal: 16, paddingTop: 12 },
     headerTop: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
     },
-    title: { fontSize: 22, fontWeight: 'bold', color: C.text },
-    gearBtn: {
-      borderWidth: 1,
-      borderColor: C.border,
-      borderRadius: 16,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      backgroundColor: C.chipBg,
-    },
-    gearText: { fontSize: 13, color: C.text },
-    count: { fontSize: 16, marginTop: 4, color: C.text },
-    stats: { fontSize: 13, marginTop: 2, color: C.muted },
-    search: {
-      marginTop: 10,
-      borderWidth: 1,
-      borderColor: C.border,
-      borderRadius: 8,
+    title: { fontSize: 24, fontWeight: 'bold', color: C.text },
+    tagline: { fontSize: 13, color: C.muted, marginTop: 4 },
+    subBtn: {
+      backgroundColor: C.subBg,
+      borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 8,
-      fontSize: 15,
-      color: C.text,
-      backgroundColor: C.inputBg,
     },
-    chips: { marginTop: 10 },
-    chipsInner: { paddingRight: 8 },
-    chip: {
-      backgroundColor: C.chipBg,
-      borderRadius: 16,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      marginRight: 8,
-    },
-    chipActive: { backgroundColor: C.chipActiveBg },
-    chipText: { fontSize: 13, color: C.chipText },
-    chipTextActive: { color: C.chipActiveText, fontWeight: 'bold' },
-    hint: { fontSize: 12, color: C.muted, marginTop: 8 },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
-    },
-    rowVisited: { backgroundColor: C.visitedBg },
-    rowText: { flex: 1 },
-    name: { fontSize: 16, fontWeight: '600', color: C.text },
-    sub: { fontSize: 12, color: C.muted, marginTop: 2 },
-    badge: {
-      borderWidth: 1,
-      borderColor: C.badgeBorder,
-      borderRadius: 14,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-    },
-    badgeText: { fontSize: 12, color: C.badgeText },
-    badgeDone: {
-      backgroundColor: '#2e7d32',
-      borderRadius: 14,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-    },
-    badgeDoneText: { fontSize: 12, color: '#ffffff', fontWeight: 'bold' },
-    empty: { textAlign: 'center', color: C.muted, marginTop: 32, fontSize: 14 },
-    modalBody: { flex: 1, padding: 20 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', color: C.text, marginBottom: 8 },
-    note: { fontSize: 13, color: C.muted, lineHeight: 19, marginVertical: 8 },
-    label: { fontSize: 14, fontWeight: '600', color: C.text, marginTop: 16, marginBottom: 6 },
-    importBox: {
-      borderWidth: 1,
-      borderColor: C.border,
-      borderRadius: 8,
-      backgroundColor: C.inputBg,
-      color: C.text,
-      minHeight: 110,
-      padding: 10,
-      fontSize: 12,
-      textAlignVertical: 'top',
-    },
-    actionBtn: {
-      backgroundColor: C.btnBg,
-      borderRadius: 10,
+    subBtnWide: {
+      backgroundColor: C.subBg,
+      borderRadius: 12,
       paddingVertical: 12,
       paddingHorizontal: 14,
       marginTop: 12,
       alignItems: 'center',
     },
-    closeBtn: { marginTop: 24 },
-    actionText: { fontSize: 15, color: C.text, fontWeight: '600' },
+    subBtnText: { fontSize: 14, fontWeight: '700', color: C.subText },
+    statsCard: {
+      backgroundColor: C.card,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 19,
+      padding: 12,
+      marginTop: 14,
+    },
+    statsRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+    stat: {
+      flex: 1,
+      backgroundColor: C.statBg,
+      borderRadius: 12,
+      padding: 12,
+    },
+    statLabel: { fontSize: 12, color: C.muted },
+    statNum: { fontSize: 22, fontWeight: 'bold', color: C.statNum, marginTop: 5 },
+    statUnit: { fontSize: 13, fontWeight: '600' },
+    search: {
+      marginTop: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      fontSize: 15,
+      color: C.text,
+      backgroundColor: C.inputBg,
+    },
+    chips: { marginTop: 12 },
+    chipsInner: { paddingRight: 8 },
+    chip: {
+      backgroundColor: C.chipBg,
+      borderRadius: 999,
+      paddingHorizontal: 13,
+      paddingVertical: 7,
+      marginRight: 8,
+    },
+    chipActive: { backgroundColor: C.primary },
+    chipText: { fontSize: 13, fontWeight: '600', color: C.subText },
+    chipTextActive: { color: '#ffffff' },
+    listContent: { paddingHorizontal: 16, paddingBottom: 24 },
+    card: {
+      backgroundColor: C.card,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 19,
+      padding: 18,
+      marginTop: 15,
+    },
+    cardTitle: { fontSize: 16, fontWeight: 'bold', color: C.text, marginBottom: 6 },
+    prow: {
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: C.barTrack,
+    },
+    ptop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    prowName: { fontSize: 15, fontWeight: 'bold', color: C.text },
+    prowCount: { fontSize: 14, color: C.muted },
+    barTrack: {
+      height: 8,
+      backgroundColor: C.barTrack,
+      borderRadius: 99,
+      marginTop: 7,
+      overflow: 'hidden',
+    },
+    barFill: { height: '100%', borderRadius: 99 },
+    stationCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: C.card,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 19,
+      padding: 16,
+      marginTop: 12,
+    },
+    rowText: { flex: 1 },
+    nameRow: { flexDirection: 'row', alignItems: 'center' },
+    name: { fontSize: 16, fontWeight: '700', color: C.text, flexShrink: 1 },
+    badgeRow: { flexDirection: 'row', marginTop: 6 },
+    badge: {
+      backgroundColor: C.badgeBg,
+      borderRadius: 999,
+      paddingHorizontal: 9,
+      paddingVertical: 2,
+      marginRight: 6,
+    },
+    badgeText: { fontSize: 12, fontWeight: '700', color: C.badgeText },
+    badgeGold: {
+      backgroundColor: C.goldBg,
+      borderRadius: 999,
+      paddingHorizontal: 9,
+      paddingVertical: 2,
+    },
+    badgeGoldText: { fontSize: 12, fontWeight: '700', color: C.goldText },
+    sub: { fontSize: 12, color: C.muted, marginTop: 6 },
+    btnCheckin: {
+      backgroundColor: C.subBg,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginLeft: 10,
+    },
+    btnCheckinText: { fontSize: 13, fontWeight: '700', color: C.subText },
+    btnDone: {
+      backgroundColor: C.primary,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginLeft: 10,
+    },
+    btnDoneText: { fontSize: 13, fontWeight: '700', color: '#ffffff' },
+    empty: { textAlign: 'center', color: C.muted, marginTop: 32, fontSize: 14 },
+    modalBody: { padding: 16, paddingBottom: 32 },
+    modalTitle: { fontSize: 22, fontWeight: 'bold', color: C.text, marginTop: 8 },
+    note: { fontSize: 13, color: C.muted, lineHeight: 19, marginVertical: 8 },
+    label: { fontSize: 14, fontWeight: '700', color: C.text, marginTop: 16, marginBottom: 6 },
+    importBox: {
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 12,
+      backgroundColor: C.inputBg,
+      color: C.text,
+      minHeight: 110,
+      padding: 12,
+      fontSize: 12,
+      textAlignVertical: 'top',
+    },
+    primaryBtn: {
+      backgroundColor: C.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      marginTop: 14,
+      alignItems: 'center',
+    },
+    primaryBtnText: { fontSize: 15, fontWeight: '700', color: '#ffffff' },
   });
 }
