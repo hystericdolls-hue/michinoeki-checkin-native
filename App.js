@@ -9,7 +9,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import stationsData from './stations.json';
+import stationsData from './stations.js';
 
 const STATIONS = stationsData.stations;
 const STORAGE_KEY = 'michinoeki-native-v1';
