@@ -12,11 +12,13 @@ import {
   Alert,
   Share,
   Image,
+  Linking,
   useColorScheme,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Location from 'expo-location';
 import stationsData from './stations.js';
 
 const STATIONS = stationsData.stations;
@@ -59,6 +61,8 @@ function makeEntry(name, pref, date, memo) {
     date,
     memo: memo || '',
     photo: '',
+    lat: null,
+    lng: null,
   };
 }
 
@@ -75,6 +79,25 @@ async function persistPhoto(tempUri, entryId) {
   }
 }
 
+// 現在地を取得（許可がない・取れない場合は null）
+async function fetchPosition() {
+  try {
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (!perm.granted) return null;
+    const pos = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
+    ]);
+    if (!pos || !pos.coords) return null;
+    return {
+      lat: Math.round(pos.coords.latitude * 100000) / 100000,
+      lng: Math.round(pos.coords.longitude * 100000) / 100000,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 // 旧バージョン（マップ形式）から新形式（entries配列）へ変換
 function convertOldRecords(records) {
   const entries = [];
@@ -82,7 +105,7 @@ function convertOldRecords(records) {
     const [pref, name] = key.split('|');
     const dates = Array.isArray(records[key]) ? records[key] : [];
     for (const date of dates) {
-      entries.push({ id: 'old-' + key + '-' + date, name, pref, date, memo: '', photo: '' });
+      entries.push({ id: 'old-' + key + '-' + date, name, pref, date, memo: '', photo: '', lat: null, lng: null });
     }
   }
   return entries;
@@ -106,6 +129,8 @@ function parseBackup(text) {
             typeof e.photo === 'string' && e.photo.indexOf('file://') === 0
               ? e.photo
               : '',
+          lat: typeof e.lat === 'number' ? e.lat : null,
+          lng: typeof e.lng === 'number' ? e.lng : null,
         }));
     }
     if (Array.isArray(d)) return parseBackup(JSON.stringify({ entries: d }));
@@ -157,6 +182,7 @@ export default function App() {
   const [draftPhoto, setDraftPhoto] = useState(null);
   const [draftMemo, setDraftMemo] = useState('');
   const [viewEntry, setViewEntry] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
 
@@ -223,6 +249,33 @@ export default function App() {
   }, [entries]);
   const since = daysSince(lastDate);
   const lastLabel = !lastDate ? '—' : since === 0 ? '今日' : since + '日前';
+
+  // 各記録が「その駅の何回目の訪問か」
+  const rankMap = useMemo(() => {
+    const map = {};
+    const counts = {};
+    const asc = [...entries].sort((a, b) => {
+      const da = a.date || '9999-99-99';
+      const db = b.date || '9999-99-99';
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+    for (const e of asc) {
+      const k = stationKey(e.name, e.pref);
+      counts[k] = (counts[k] || 0) + 1;
+      map[e.id] = counts[k];
+    }
+    return map;
+  }, [entries]);
+
+  // 履歴一覧（日付ありは新しい順、日付不明は最後）
+  const historyList = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      if (a.date && b.date) return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+      if (a.date) return -1;
+      if (b.date) return 1;
+      return 0;
+    });
+  }, [entries]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -297,10 +350,56 @@ export default function App() {
     if (!checkinTarget) return;
     const entry = makeEntry(checkinTarget.name, checkinTarget.pref, today, draftMemo.trim());
     if (draftPhoto) entry.photo = await persistPhoto(draftPhoto, entry.id);
+    const pos = await fetchPosition();
+    if (pos) {
+      entry.lat = pos.lat;
+      entry.lng = pos.lng;
+    }
     setEntries((prev) => [...prev, entry]);
     setCheckinTarget(null);
     setDraftPhoto(null);
     setDraftMemo('');
+    setViewEntry(entry);
+  }
+
+  async function shareEntry(e) {
+    const text =
+      '道の駅「' +
+      e.name +
+      '」にチェックイン！（' +
+      e.pref +
+      '）' +
+      (e.date ? ' ' + e.date : '') +
+      (e.memo ? '\n' + e.memo : '') +
+      '\n#道の駅';
+    try {
+      await Share.share(e.photo ? { message: text, url: e.photo } : { message: text });
+    } catch (err) {
+      // 共有がキャンセルされた場合は何もしない
+    }
+  }
+
+  function openMap(e) {
+    Linking.openURL('https://maps.apple.com/?q=' + e.lat + ',' + e.lng).catch(() => {});
+  }
+
+  function deleteEntry(entry) {
+    Alert.alert(
+      'この記録を消しますか？',
+      entry.name + '（' + (entry.date || '日付不明') + '）の記録を消します。',
+      [
+        { text: 'やめる', style: 'cancel' },
+        {
+          text: '消す',
+          style: 'destructive',
+          onPress: () => {
+            if (entry.photo)
+              FileSystem.deleteAsync(entry.photo, { idempotent: true }).catch(() => {});
+            setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+          },
+        },
+      ]
+    );
   }
 
   async function exportBackup() {
@@ -436,9 +535,14 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.title}>道の駅チェックイン</Text>
-          <TouchableOpacity style={styles.subBtn} onPress={() => setSettingsOpen(true)}>
-            <Text style={styles.subBtnText}>⚙ 設定</Text>
-          </TouchableOpacity>
+          <View style={styles.headerBtns}>
+            <TouchableOpacity style={styles.subBtn} onPress={() => setHistoryOpen(true)}>
+              <Text style={styles.subBtnText}>📖 履歴</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.subBtn} onPress={() => setSettingsOpen(true)}>
+              <Text style={styles.subBtnText}>⚙ 設定</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <Text style={styles.tagline}>
           立ち寄った道の駅を記録して、制覇を目指そう。全国{STATIONS.length}駅収録。
@@ -515,6 +619,9 @@ export default function App() {
                 <Text style={styles.sub}>
                   {checkinTarget.pref} ・ 日付：今日（{today}）
                 </Text>
+                <Text style={styles.note}>
+                  チェックインすると、今いる場所（GPS）も一緒に記録します。
+                </Text>
                 {draftPhoto ? (
                   <View>
                     <Image source={{ uri: draftPhoto }} style={styles.photoPreview} />
@@ -570,12 +677,78 @@ export default function App() {
                   <Image source={{ uri: viewEntry.photo }} style={styles.photoLarge} />
                 ) : null}
                 {viewEntry.memo ? <Text style={styles.viewMemo}>{viewEntry.memo}</Text> : null}
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => setViewEntry(null)}>
-                  <Text style={styles.primaryBtnText}>閉じる</Text>
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => shareEntry(viewEntry)}>
+                  <Text style={styles.primaryBtnText}>📤 共有する</Text>
+                </TouchableOpacity>
+                {viewEntry.lat != null && viewEntry.lng != null ? (
+                  <TouchableOpacity style={styles.subBtnWide} onPress={() => openMap(viewEntry)}>
+                    <Text style={styles.subBtnText}>📍 地図で見る</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity style={styles.subBtnWide} onPress={() => setViewEntry(null)}>
+                  <Text style={styles.subBtnText}>閉じる</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
           </ScrollView>
+        </SafeAreaView>
+      </Modal>
+      <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.modalBody}>
+            <Text style={styles.modalTitle}>訪問履歴（{entries.length}件）</Text>
+          </View>
+          <FlatList
+            data={historyList}
+            keyExtractor={(e) => e.id}
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={<Text style={styles.empty}>まだ記録がありません</Text>}
+            renderItem={({ item }) => (
+              <View style={styles.stationCard}>
+                {item.photo ? (
+                  <TouchableOpacity onPress={() => setViewEntry(item)} activeOpacity={0.8}>
+                    <Image source={{ uri: item.photo }} style={styles.thumb} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.rowText}
+                  onPress={() => setViewEntry(item)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.name}>{item.name}</Text>
+                  <View style={styles.badgeRow}>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{item.pref}</Text>
+                    </View>
+                    {item.lat != null ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>📍位置あり</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.sub}>
+                    {(item.date || '日付不明') +
+                      ' ・ ' +
+                      (rankMap[item.id] || 1) +
+                      '回目の訪問'}
+                  </Text>
+                  {item.memo ? (
+                    <Text style={styles.sub} numberOfLines={1}>
+                      {item.memo}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.btnCheckin} onPress={() => deleteEntry(item)}>
+                  <Text style={styles.btnCheckinText}>削除</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+          <View style={styles.modalBody}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setHistoryOpen(false)}>
+              <Text style={styles.primaryBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
         </SafeAreaView>
       </Modal>
       <Modal visible={prefModalOpen} animationType="slide" onRequestClose={() => setPrefModalOpen(false)}>
@@ -712,7 +885,8 @@ function makeStyles(C) {
       justifyContent: 'space-between',
       alignItems: 'center',
     },
-    title: { fontSize: 24, fontWeight: 'bold', color: C.text },
+    title: { fontSize: 24, fontWeight: 'bold', color: C.text, flexShrink: 1 },
+    headerBtns: { flexDirection: 'row', gap: 8 },
     tagline: { fontSize: 13, color: C.muted, marginTop: 4 },
     subBtn: {
       backgroundColor: C.subBg,
