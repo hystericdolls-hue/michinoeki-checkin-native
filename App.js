@@ -130,6 +130,7 @@ export default function App() {
   const [prefFilter, setPrefFilter] = useState('すべて');
   const [loaded, setLoaded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prefModalOpen, setPrefModalOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
 
@@ -390,24 +391,9 @@ export default function App() {
           value={query}
           onChangeText={setQuery}
         />
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chips}
-          contentContainerStyle={styles.chipsInner}
-        >
-          {['すべて', ...PREFS].map((p) => (
-            <TouchableOpacity
-              key={p}
-              style={[styles.chip, prefFilter === p && styles.chipActive]}
-              onPress={() => setPrefFilter(p)}
-            >
-              <Text style={[styles.chipText, prefFilter === p && styles.chipTextActive]}>
-                {p}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <TouchableOpacity style={styles.filterBtn} onPress={() => setPrefModalOpen(true)}>
+          <Text style={styles.filterBtnText}>都道府県で絞り込む：{prefFilter} ▾</Text>
+        </TouchableOpacity>
       </View>
       <FlatList
         data={filtered}
@@ -419,6 +405,41 @@ export default function App() {
         }
         contentContainerStyle={styles.listContent}
       />
+      <Modal visible={prefModalOpen} animationType="slide" onRequestClose={() => setPrefModalOpen(false)}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.modalBody}>
+            <Text style={styles.modalTitle}>都道府県を選ぶ</Text>
+          </View>
+          <FlatList
+            data={['すべて', ...PREFS]}
+            keyExtractor={(p) => p}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.prefRow}
+                onPress={() => {
+                  setPrefFilter(item);
+                  setPrefModalOpen(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.prefRowText,
+                    prefFilter === item && styles.prefRowTextActive,
+                  ]}
+                >
+                  {item}
+                </Text>
+                {prefFilter === item ? <Text style={styles.prefCheck}>✓</Text> : null}
+              </TouchableOpacity>
+            )}
+          />
+          <View style={styles.modalBody}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setPrefModalOpen(false)}>
+              <Text style={styles.primaryBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
       <Modal visible={settingsOpen} animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
         <SafeAreaView style={styles.container}>
           <ScrollView contentContainerStyle={styles.modalBody}>
@@ -466,21 +487,21 @@ export default function App() {
 }
 
 const LIGHT = {
-  page: '#faf8fc',
+  page: '#fdfcff',
   card: '#ffffff',
-  border: '#ece4f6',
-  text: '#332b47',
-  muted: '#776d89',
-  statBg: '#f4edff',
-  statNum: '#7247bc',
+  border: '#f0e9fa',
+  text: '#4a4266',
+  muted: '#8d84a3',
+  statBg: '#f7f2ff',
+  statNum: '#7c4dc4',
   primary: '#8656cf',
-  subBg: '#e9e1f7',
+  subBg: '#f1eafd',
   subText: '#5b4390',
-  badgeBg: '#f4edff',
+  badgeBg: '#f7f2ff',
   badgeText: '#7247bc',
   goldBg: '#fff3cf',
   goldText: '#9a6b00',
-  barTrack: '#f0eaf9',
+  barTrack: '#f3eefc',
   barFill: '#8656cf',
   barFull: '#e6a817',
   inputBg: '#ffffff',
@@ -564,18 +585,26 @@ function makeStyles(C) {
       color: C.text,
       backgroundColor: C.inputBg,
     },
-    chips: { marginTop: 12 },
-    chipsInner: { paddingRight: 8 },
-    chip: {
-      backgroundColor: C.chipBg,
-      borderRadius: 999,
-      paddingHorizontal: 13,
-      paddingVertical: 7,
-      marginRight: 8,
+    filterBtn: {
+      marginTop: 12,
+      backgroundColor: C.subBg,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
     },
-    chipActive: { backgroundColor: C.primary },
-    chipText: { fontSize: 13, fontWeight: '600', color: C.subText },
-    chipTextActive: { color: '#ffffff' },
+    filterBtnText: { fontSize: 14, fontWeight: '700', color: C.subText },
+    prefRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: C.border,
+    },
+    prefRowText: { fontSize: 16, color: C.text },
+    prefRowTextActive: { fontWeight: 'bold', color: C.statNum },
+    prefCheck: { fontSize: 16, color: C.statNum, fontWeight: 'bold' },
     listContent: { paddingHorizontal: 16, paddingBottom: 24 },
     card: {
       backgroundColor: C.card,
