@@ -131,6 +131,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefModalOpen, setPrefModalOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
 
@@ -384,6 +385,17 @@ export default function App() {
             </View>
           </View>
         </View>
+        {progress.length > 0 ? (
+          <TouchableOpacity
+            style={styles.progressToggle}
+            onPress={() => setProgressOpen(!progressOpen)}
+          >
+            <Text style={styles.progressToggleText}>
+              都道府県別の進み具合 {progressOpen ? '▴ 閉じる' : '▸ 開く'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+        {progressOpen ? renderProgress() : null}
         <TextInput
           style={styles.search}
           placeholder="駅名・よみ・都道府県で検索"
@@ -399,7 +411,6 @@ export default function App() {
         data={filtered}
         keyExtractor={(item) => stationKey(item.name, item.pref)}
         renderItem={renderItem}
-        ListHeaderComponent={renderProgress}
         ListEmptyComponent={
           <Text style={styles.empty}>条件に合う駅がありません</Text>
         }
@@ -487,47 +498,47 @@ export default function App() {
 }
 
 const LIGHT = {
-  page: '#fdfcff',
+  page: '#fbfdff',
   card: '#ffffff',
-  border: '#f0e9fa',
-  text: '#4a4266',
-  muted: '#8d84a3',
-  statBg: '#f7f2ff',
-  statNum: '#7c4dc4',
-  primary: '#8656cf',
-  subBg: '#f1eafd',
-  subText: '#5b4390',
-  badgeBg: '#f7f2ff',
-  badgeText: '#7247bc',
+  border: '#e2f0fa',
+  text: '#3d5266',
+  muted: '#8496a8',
+  statBg: '#eef7fe',
+  statNum: '#0284c7',
+  primary: '#0ea5e9',
+  subBg: '#e6f4fd',
+  subText: '#0369a1',
+  badgeBg: '#eef7fe',
+  badgeText: '#0284c7',
   goldBg: '#fff3cf',
   goldText: '#9a6b00',
-  barTrack: '#f3eefc',
-  barFill: '#8656cf',
+  barTrack: '#eaf4fb',
+  barFill: '#38bdf8',
   barFull: '#e6a817',
   inputBg: '#ffffff',
-  chipBg: '#eee9f7',
+  chipBg: '#e6f4fd',
 };
 
 const DARK = {
-  page: '#17131f',
-  card: '#241c33',
-  border: '#3a2f52',
-  text: '#f2eefc',
-  muted: '#a79bbb',
-  statBg: '#2e2444',
-  statNum: '#c4aef0',
-  primary: '#8656cf',
-  subBg: '#3a2f52',
-  subText: '#d9ccf5',
-  badgeBg: '#2e2444',
-  badgeText: '#c4aef0',
+  page: '#0b1826',
+  card: '#122636',
+  border: '#1e3a4f',
+  text: '#eaf4fb',
+  muted: '#93a9bc',
+  statBg: '#173349',
+  statNum: '#7dd3fc',
+  primary: '#0ea5e9',
+  subBg: '#1e3a4f',
+  subText: '#bae6fd',
+  badgeBg: '#173349',
+  badgeText: '#7dd3fc',
   goldBg: '#4a3a10',
   goldText: '#ffd968',
-  barTrack: '#17131f',
-  barFill: '#8656cf',
+  barTrack: '#0b1826',
+  barFill: '#38bdf8',
   barFull: '#e6a817',
-  inputBg: '#241c33',
-  chipBg: '#2e2444',
+  inputBg: '#122636',
+  chipBg: '#173349',
 };
 
 function makeStyles(C) {
@@ -593,6 +604,8 @@ function makeStyles(C) {
       paddingHorizontal: 14,
     },
     filterBtnText: { fontSize: 14, fontWeight: '700', color: C.subText },
+    progressToggle: { marginTop: 12, paddingVertical: 4 },
+    progressToggleText: { fontSize: 14, fontWeight: '700', color: C.statNum },
     prefRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
