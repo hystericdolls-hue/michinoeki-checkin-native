@@ -6,9 +6,9 @@ Web版「道の駅チェックイン」を、Expo（React Native）で作り直�
 ## 試し方（iPhone）
 
 1. App Storeで「Expo Go」を入れる
-2. Snackでこのリポジトリを開く：
-   https://snack.expo.dev/github.com/hystericdolls-hue/michinoeki-checkin-native
-3. 表示されるQRコードを Expo Go で読み取ると、自分のiPhoneで動く
+2. Snackのページを開く：
+   https://snack.expo.dev/CAlOH3hbcKJgQaXhJwL5z
+3. ページの案内から Expo Go で開くと、自分のiPhoneで動く
 
 ## 使い方
 
