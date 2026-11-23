@@ -11,9 +11,12 @@ import {
   Modal,
   Alert,
   Share,
+  Image,
   useColorScheme,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import stationsData from './stations.js';
 
 const STATIONS = stationsData.stations;
@@ -48,14 +51,28 @@ function daysSince(dateStr) {
   return Math.round((today - then) / 86400000);
 }
 
-function makeEntry(name, pref, date) {
+function makeEntry(name, pref, date, memo) {
   return {
     id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
     name,
     pref,
     date,
-    memo: '',
+    memo: memo || '',
+    photo: '',
   };
+}
+
+// 写真をアプリ専用フォルダにコピーして残す（失敗したら元の場所のまま）
+async function persistPhoto(tempUri, entryId) {
+  try {
+    const dir = FileSystem.documentDirectory + 'photos/';
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    const dest = dir + entryId + '.jpg';
+    await FileSystem.copyAsync({ from: tempUri, to: dest });
+    return dest;
+  } catch (e) {
+    return tempUri;
+  }
 }
 
 // 旧バージョン（マップ形式）から新形式（entries配列）へ変換
@@ -65,7 +82,7 @@ function convertOldRecords(records) {
     const [pref, name] = key.split('|');
     const dates = Array.isArray(records[key]) ? records[key] : [];
     for (const date of dates) {
-      entries.push({ id: 'old-' + key + '-' + date, name, pref, date, memo: '' });
+      entries.push({ id: 'old-' + key + '-' + date, name, pref, date, memo: '', photo: '' });
     }
   }
   return entries;
@@ -85,6 +102,10 @@ function parseBackup(text) {
           pref: e.pref,
           date: e.date || '',
           memo: e.memo || '',
+          photo:
+            typeof e.photo === 'string' && e.photo.indexOf('file://') === 0
+              ? e.photo
+              : '',
         }));
     }
     if (Array.isArray(d)) return parseBackup(JSON.stringify({ entries: d }));
@@ -132,6 +153,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefModalOpen, setPrefModalOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
+  const [checkinTarget, setCheckinTarget] = useState(null);
+  const [draftPhoto, setDraftPhoto] = useState(null);
+  const [draftMemo, setDraftMemo] = useState('');
+  const [viewEntry, setViewEntry] = useState(null);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
 
@@ -173,8 +198,10 @@ export default function App() {
     const map = {};
     for (const e of entries) {
       const k = stationKey(e.name, e.pref);
-      if (!map[k]) map[k] = { count: 0, last: '', hasToday: false, hasUnknown: false };
+      if (!map[k])
+        map[k] = { count: 0, last: '', hasToday: false, hasUnknown: false, latest: null };
       map[k].count += 1;
+      if (!map[k].latest || e.date >= (map[k].latest.date || '')) map[k].latest = e;
       if (e.date) {
         if (e.date > map[k].last) map[k].last = e.date;
         if (e.date === today) map[k].hasToday = true;
@@ -206,17 +233,74 @@ export default function App() {
     });
   }, [query, prefFilter]);
 
-  function toggleStation(station) {
+  function openCheckin(station) {
     const st = stationStats[stationKey(station.name, station.pref)];
     if (st && st.hasToday) {
-      setEntries((prev) =>
-        prev.filter(
-          (e) => !(e.name === station.name && e.pref === station.pref && e.date === today)
-        )
+      Alert.alert(
+        'チェックインを取り消しますか？',
+        station.name + ' の今日のチェックインを取り消します。',
+        [
+          { text: 'やめる', style: 'cancel' },
+          {
+            text: '取り消す',
+            style: 'destructive',
+            onPress: () => {
+              const todays = entries.filter(
+                (e) =>
+                  e.name === station.name && e.pref === station.pref && e.date === today
+              );
+              todays.forEach((e) => {
+                if (e.photo)
+                  FileSystem.deleteAsync(e.photo, { idempotent: true }).catch(() => {});
+              });
+              setEntries((prev) =>
+                prev.filter(
+                  (e) =>
+                    !(e.name === station.name && e.pref === station.pref && e.date === today)
+                )
+              );
+            },
+          },
+        ]
       );
     } else {
-      setEntries((prev) => [...prev, makeEntry(station.name, station.pref, today)]);
+      setDraftPhoto(null);
+      setDraftMemo('');
+      setCheckinTarget(station);
     }
+  }
+
+  async function pickPhoto(fromCamera) {
+    try {
+      const perm = fromCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          '許可が必要です',
+          fromCamera ? 'カメラの許可が必要です。' : '写真へのアクセス許可が必要です。'
+        );
+        return;
+      }
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setDraftPhoto(result.assets[0].uri);
+      }
+    } catch (e) {
+      Alert.alert('写真を開けませんでした');
+    }
+  }
+
+  async function saveCheckin() {
+    if (!checkinTarget) return;
+    const entry = makeEntry(checkinTarget.name, checkinTarget.pref, today, draftMemo.trim());
+    if (draftPhoto) entry.photo = await persistPhoto(draftPhoto, entry.id);
+    setEntries((prev) => [...prev, entry]);
+    setCheckinTarget(null);
+    setDraftPhoto(null);
+    setDraftMemo('');
   }
 
   async function exportBackup() {
@@ -301,12 +385,18 @@ export default function App() {
   function renderItem({ item }) {
     const st = stationStats[stationKey(item.name, item.pref)];
     const visited = !!st;
+    const latest = st ? st.latest : null;
     return (
       <TouchableOpacity
         style={styles.stationCard}
-        onPress={() => toggleStation(item)}
+        onPress={() => openCheckin(item)}
         activeOpacity={0.7}
       >
+        {latest && latest.photo ? (
+          <TouchableOpacity onPress={() => setViewEntry(latest)} activeOpacity={0.8}>
+            <Image source={{ uri: latest.photo }} style={styles.thumb} />
+          </TouchableOpacity>
+        ) : null}
         <View style={styles.rowText}>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{item.name}</Text>
@@ -321,11 +411,10 @@ export default function App() {
               </View>
             ) : null}
           </View>
-          <Text style={styles.sub}>
+          <Text style={styles.sub} numberOfLines={1}>
             {visited
-              ? st.last
-                ? '最終訪問 ' + st.last
-                : '日付不明の記録'
+              ? (st.last ? '最終訪問 ' + st.last : '日付不明の記録') +
+                (latest && latest.memo ? ' ・ ' + latest.memo : '')
               : 'まだ行ってない'}
           </Text>
         </View>
@@ -416,6 +505,79 @@ export default function App() {
         }
         contentContainerStyle={styles.listContent}
       />
+      <Modal visible={!!checkinTarget} animationType="slide" onRequestClose={() => setCheckinTarget(null)}>
+        <SafeAreaView style={styles.container}>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <Text style={styles.modalTitle}>チェックイン</Text>
+            {checkinTarget ? (
+              <View style={styles.card}>
+                <Text style={styles.ciName}>{checkinTarget.name}</Text>
+                <Text style={styles.sub}>
+                  {checkinTarget.pref} ・ 日付：今日（{today}）
+                </Text>
+                {draftPhoto ? (
+                  <View>
+                    <Image source={{ uri: draftPhoto }} style={styles.photoPreview} />
+                    <View style={styles.photoBtns}>
+                      <TouchableOpacity style={styles.subBtn} onPress={() => pickPhoto(false)}>
+                        <Text style={styles.subBtnText}>写真を変える</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.subBtn} onPress={() => setDraftPhoto(null)}>
+                        <Text style={styles.subBtnText}>写真を消す</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.photoBtns}>
+                    <TouchableOpacity style={styles.subBtn} onPress={() => pickPhoto(true)}>
+                      <Text style={styles.subBtnText}>📷 写真を撮る</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.subBtn} onPress={() => pickPhoto(false)}>
+                      <Text style={styles.subBtnText}>🖼 アルバムから選ぶ</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <Text style={styles.label}>メモ（任意）</Text>
+                <TextInput
+                  style={styles.memoInput}
+                  placeholder="ひとことメモ"
+                  placeholderTextColor={C.muted}
+                  value={draftMemo}
+                  onChangeText={setDraftMemo}
+                  multiline
+                />
+                <TouchableOpacity style={styles.primaryBtn} onPress={saveCheckin}>
+                  <Text style={styles.primaryBtnText}>チェックインする</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setCheckinTarget(null)}>
+                  <Text style={styles.cancelText}>やめる</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+      <Modal visible={!!viewEntry} animationType="fade" onRequestClose={() => setViewEntry(null)}>
+        <SafeAreaView style={styles.container}>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            {viewEntry ? (
+              <View>
+                <Text style={styles.modalTitle}>{viewEntry.name}</Text>
+                <Text style={styles.sub}>
+                  {viewEntry.pref} ・ {viewEntry.date || '日付不明'}
+                </Text>
+                {viewEntry.photo ? (
+                  <Image source={{ uri: viewEntry.photo }} style={styles.photoLarge} />
+                ) : null}
+                {viewEntry.memo ? <Text style={styles.viewMemo}>{viewEntry.memo}</Text> : null}
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => setViewEntry(null)}>
+                  <Text style={styles.primaryBtnText}>閉じる</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
       <Modal visible={prefModalOpen} animationType="slide" onRequestClose={() => setPrefModalOpen(false)}>
         <SafeAreaView style={styles.container}>
           <View style={styles.modalBody}>
@@ -615,6 +777,25 @@ function makeStyles(C) {
       borderBottomWidth: 1,
       borderBottomColor: C.border,
     },
+    thumb: { width: 46, height: 46, borderRadius: 10, marginRight: 12 },
+    ciName: { fontSize: 19, fontWeight: 'bold', color: C.text },
+    photoPreview: { width: '100%', height: 220, borderRadius: 12, marginTop: 12 },
+    photoLarge: { width: '100%', height: 300, borderRadius: 12, marginTop: 12 },
+    photoBtns: { flexDirection: 'row', gap: 10, marginTop: 12, flexWrap: 'wrap' },
+    memoInput: {
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 12,
+      backgroundColor: C.inputBg,
+      color: C.text,
+      minHeight: 64,
+      padding: 12,
+      fontSize: 15,
+      textAlignVertical: 'top',
+    },
+    cancelBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
+    cancelText: { fontSize: 15, color: C.muted, fontWeight: '600' },
+    viewMemo: { fontSize: 15, color: C.text, lineHeight: 22, marginTop: 12 },
     prefRowText: { fontSize: 16, color: C.text },
     prefRowTextActive: { fontWeight: 'bold', color: C.statNum },
     prefCheck: { fontSize: 16, color: C.statNum, fontWeight: 'bold' },
