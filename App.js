@@ -278,33 +278,41 @@ export default function App() {
     });
   }, [query, prefFilter]);
 
+  function todayCountFor(station) {
+    return entries.filter(
+      (e) => e.name === station.name && e.pref === station.pref && e.date === today
+    ).length;
+  }
+
   function openCheckin(station) {
-    const st = stationStats[stationKey(station.name, station.pref)];
-    if (st && st.hasToday) {
-      Alert.alert(
-        'チェックインを取り消しますか？',
-        station.name + ' の今日のチェックインを取り消します。',
-        [
-          { text: 'やめる', style: 'cancel' },
-          {
-            text: '取り消す',
-            style: 'destructive',
-            onPress: () => {
-              setEntries((prev) =>
-                prev.filter(
-                  (e) =>
-                    !(e.name === station.name && e.pref === station.pref && e.date === today)
-                )
-              );
-            },
+    setDraftPhoto(null);
+    setDraftMemo('');
+    setCheckinTarget(station);
+  }
+
+  function undoToday(station) {
+    Alert.alert(
+      '取り消しの確認',
+      '今日の「' + station.name + '」のチェックインを取り消しますか？',
+      [
+        { text: 'やめる', style: 'cancel' },
+        {
+          text: '取り消す',
+          style: 'destructive',
+          onPress: () => {
+            setEntries((prev) =>
+              prev.filter(
+                (e) =>
+                  !(e.name === station.name && e.pref === station.pref && e.date === today)
+              )
+            );
+            setCheckinTarget(null);
+            setDraftPhoto(null);
+            setDraftMemo('');
           },
-        ]
-      );
-    } else {
-      setDraftPhoto(null);
-      setDraftMemo('');
-      setCheckinTarget(station);
-    }
+        },
+      ]
+    );
   }
 
   async function pickPhoto(fromCamera) {
@@ -620,6 +628,11 @@ export default function App() {
                 <Text style={styles.sub}>
                   {checkinTarget.pref} ・ 日付：今日（{today}）
                 </Text>
+                {todayCountFor(checkinTarget) > 0 ? (
+                  <Text style={styles.sub}>
+                    今日 {todayCountFor(checkinTarget)} 回チェックイン済み（もう1回もできます）
+                  </Text>
+                ) : null}
                 <Text style={styles.note}>
                   チェックインすると、今いる場所（GPS）も一緒に記録します。
                 </Text>
@@ -660,6 +673,14 @@ export default function App() {
                 <TouchableOpacity style={styles.cancelBtn} onPress={() => setCheckinTarget(null)}>
                   <Text style={styles.cancelText}>やめる</Text>
                 </TouchableOpacity>
+                {todayCountFor(checkinTarget) > 0 ? (
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => undoToday(checkinTarget)}
+                  >
+                    <Text style={styles.dangerText}>今日のチェックインを取り消す</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ) : null}
           </ScrollView>
@@ -973,6 +994,7 @@ function makeStyles(C) {
     },
     cancelBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
     cancelText: { fontSize: 15, color: C.muted, fontWeight: '600' },
+    dangerText: { fontSize: 15, color: '#e11d48', fontWeight: '700' },
     viewMemo: { fontSize: 15, color: C.text, lineHeight: 22, marginTop: 12 },
     prefRowText: { fontSize: 16, color: C.text },
     prefRowTextActive: { fontWeight: 'bold', color: C.statNum },
