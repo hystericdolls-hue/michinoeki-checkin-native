@@ -363,9 +363,8 @@ export default function App() {
   }
 
   function openMap(e) {
-    Linking.openURL(
-      'https://www.google.com/maps/search/?api=1&query=' + e.lat + ',' + e.lng
-    ).catch(() => {});
+    const q = encodeURIComponent(e.name + ' ' + e.pref);
+    Linking.openURL('https://www.google.com/maps/search/?api=1&query=' + q).catch(() => {});
   }
 
   function deleteEntry(entry) {
@@ -647,35 +646,6 @@ export default function App() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
-      <Modal visible={!!viewEntry} animationType="fade" onRequestClose={() => setViewEntry(null)}>
-        <SafeAreaView style={styles.container}>
-          <ScrollView contentContainerStyle={styles.modalBody}>
-            {viewEntry ? (
-              <View>
-                <Text style={styles.modalTitle}>{viewEntry.name}</Text>
-                <Text style={styles.sub}>
-                  {viewEntry.pref} ・ {viewEntry.date || '日付不明'}
-                </Text>
-                {viewEntry.photo ? (
-                  <Image source={{ uri: viewEntry.photo }} style={styles.photoLarge} />
-                ) : null}
-                {viewEntry.memo ? <Text style={styles.viewMemo}>{viewEntry.memo}</Text> : null}
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => shareEntry(viewEntry)}>
-                  <Text style={styles.primaryBtnText}>📤 共有する</Text>
-                </TouchableOpacity>
-                {viewEntry.lat != null && viewEntry.lng != null ? (
-                  <TouchableOpacity style={styles.subBtnWide} onPress={() => openMap(viewEntry)}>
-                    <Text style={styles.subBtnText}>📍 地図で見る</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity style={styles.subBtnWide} onPress={() => setViewEntry(null)}>
-                  <Text style={styles.subBtnText}>閉じる</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
       <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
         <SafeAreaView style={styles.container}>
           <View style={styles.modalBody}>
@@ -808,6 +778,33 @@ export default function App() {
             <Text style={styles.note}>
               駅データは国土交通省「道の駅」一覧（2026年9月4日現在・全1,234駅）をもとに作成しています。制作：Happy Monster Select
             </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+      <Modal visible={!!viewEntry} animationType="fade" onRequestClose={() => setViewEntry(null)}>
+        <SafeAreaView style={styles.container}>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            {viewEntry ? (
+              <View>
+                <Text style={styles.modalTitle}>{viewEntry.name}</Text>
+                <Text style={styles.sub}>
+                  {viewEntry.pref} ・ {viewEntry.date || '日付不明'}
+                </Text>
+                {viewEntry.photo ? (
+                  <Image source={{ uri: viewEntry.photo }} style={styles.photoLarge} />
+                ) : null}
+                {viewEntry.memo ? <Text style={styles.viewMemo}>{viewEntry.memo}</Text> : null}
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => shareEntry(viewEntry)}>
+                  <Text style={styles.primaryBtnText}>📤 共有する</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.subBtnWide} onPress={() => openMap(viewEntry)}>
+                  <Text style={styles.subBtnText}>📍 地図で見る（Googleマップ）</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.subBtnWide} onPress={() => setViewEntry(null)}>
+                  <Text style={styles.subBtnText}>閉じる</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </ScrollView>
         </SafeAreaView>
       </Modal>
