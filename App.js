@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import stationsData from './stations.js';
 
@@ -66,17 +65,9 @@ function makeEntry(name, pref, date, memo) {
   };
 }
 
-// 写真をアプリ専用フォルダにコピーして残す（失敗したら元の場所のまま）
+// 写真の保存先URLを返す（Snack版では選んだ写真の場所をそのまま使う）
 async function persistPhoto(tempUri, entryId) {
-  try {
-    const dir = FileSystem.documentDirectory + 'photos/';
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-    const dest = dir + entryId + '.jpg';
-    await FileSystem.copyAsync({ from: tempUri, to: dest });
-    return dest;
-  } catch (e) {
-    return tempUri;
-  }
+  return tempUri;
 }
 
 // 現在地を取得（許可がない・取れない場合は null）
@@ -298,14 +289,6 @@ export default function App() {
             text: '取り消す',
             style: 'destructive',
             onPress: () => {
-              const todays = entries.filter(
-                (e) =>
-                  e.name === station.name && e.pref === station.pref && e.date === today
-              );
-              todays.forEach((e) => {
-                if (e.photo)
-                  FileSystem.deleteAsync(e.photo, { idempotent: true }).catch(() => {});
-              });
               setEntries((prev) =>
                 prev.filter(
                   (e) =>
@@ -393,8 +376,6 @@ export default function App() {
           text: '消す',
           style: 'destructive',
           onPress: () => {
-            if (entry.photo)
-              FileSystem.deleteAsync(entry.photo, { idempotent: true }).catch(() => {});
             setEntries((prev) => prev.filter((e) => e.id !== entry.id));
           },
         },
