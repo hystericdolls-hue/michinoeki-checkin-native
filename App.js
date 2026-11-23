@@ -174,6 +174,7 @@ export default function App() {
   const [draftMemo, setDraftMemo] = useState('');
   const [viewEntry, setViewEntry] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [pendingView, setPendingView] = useState(null);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
 
@@ -342,7 +343,20 @@ export default function App() {
     setCheckinTarget(null);
     setDraftPhoto(null);
     setDraftMemo('');
-    setViewEntry(entry);
+    setPendingView(entry);
+  }
+
+  // モーダルを閉じ終わってから詳細を開く（iOSはモーダルの重ねがけが苦手なため）
+  function openPendingView() {
+    if (pendingView) {
+      setViewEntry(pendingView);
+      setPendingView(null);
+    }
+  }
+
+  function openEntryFromHistory(entry) {
+    setPendingView(entry);
+    setHistoryOpen(false);
   }
 
   async function shareEntry(e) {
@@ -591,7 +605,12 @@ export default function App() {
         }
         contentContainerStyle={styles.listContent}
       />
-      <Modal visible={!!checkinTarget} animationType="slide" onRequestClose={() => setCheckinTarget(null)}>
+      <Modal
+        visible={!!checkinTarget}
+        animationType="slide"
+        onRequestClose={() => setCheckinTarget(null)}
+        onDismiss={openPendingView}
+      >
         <SafeAreaView style={styles.container}>
           <ScrollView contentContainerStyle={styles.modalBody}>
             <Text style={styles.modalTitle}>チェックイン</Text>
@@ -646,7 +665,12 @@ export default function App() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
-      <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
+      <Modal
+        visible={historyOpen}
+        animationType="slide"
+        onRequestClose={() => setHistoryOpen(false)}
+        onDismiss={openPendingView}
+      >
         <SafeAreaView style={styles.container}>
           <View style={styles.modalBody}>
             <Text style={styles.modalTitle}>訪問履歴（{entries.length}件）</Text>
@@ -659,13 +683,13 @@ export default function App() {
             renderItem={({ item }) => (
               <View style={styles.stationCard}>
                 {item.photo ? (
-                  <TouchableOpacity onPress={() => setViewEntry(item)} activeOpacity={0.8}>
+                  <TouchableOpacity onPress={() => openEntryFromHistory(item)} activeOpacity={0.8}>
                     <Image source={{ uri: item.photo }} style={styles.thumb} />
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity
                   style={styles.rowText}
-                  onPress={() => setViewEntry(item)}
+                  onPress={() => openEntryFromHistory(item)}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.name}>{item.name}</Text>
