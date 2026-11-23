@@ -174,6 +174,7 @@ export default function App() {
   const [draftMemo, setDraftMemo] = useState('');
   const [viewEntry, setViewEntry] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [pendingView, setPendingView] = useState(null);
   const [importText, setImportText] = useState('');
   const [theme, setTheme] = useState(null); // 'light' | 'dark' | null(システム)
@@ -540,6 +541,9 @@ export default function App() {
         <View style={styles.headerTop}>
           <Text style={styles.title}>道の駅チェックイン</Text>
           <View style={styles.headerBtns}>
+            <TouchableOpacity style={styles.subBtn} onPress={() => setHelpOpen(true)}>
+              <Text style={styles.subBtnText}>❓ 使い方</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.subBtn} onPress={() => setHistoryOpen(true)}>
               <Text style={styles.subBtnText}>📖 履歴</Text>
             </TouchableOpacity>
@@ -826,6 +830,59 @@ export default function App() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
+      <Modal visible={helpOpen} animationType="slide" onRequestClose={() => setHelpOpen(false)}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.modalHead}>
+            <Text style={styles.modalTitle}>使い方</Text>
+            <TouchableOpacity style={styles.subBtn} onPress={() => setHelpOpen(false)}>
+              <Text style={styles.subBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <Text style={styles.helpH}>✅ チェックインする</Text>
+            <Text style={styles.helpP}>
+              ・駅の名前をタップすると、チェックイン画面が開きます{'\n'}
+              ・写真を撮る／アルバムから選ぶ、メモを書く（どちらも任意です）{'\n'}
+              ・「チェックインする」を押すと記録され、今いる場所（GPS）も一緒に残ります{'\n'}
+              ・同じ駅には、同じ日に何回でもチェックインできます
+            </Text>
+            <Text style={styles.helpH}>↩️ チェックインを取り消す</Text>
+            <Text style={styles.helpP}>
+              ・今日の分：駅をタップ → 画面の下にある「今日のチェックインを取り消す」{'\n'}
+              ・過去の分：上の「📖 履歴」から、その記録の「削除」を押します
+            </Text>
+            <Text style={styles.helpH}>📷 写真と詳細を見る</Text>
+            <Text style={styles.helpP}>
+              ・駅一覧の写真や、履歴の記録をタップすると、大きく表示されます{'\n'}
+              ・詳細画面から「📤 共有する」と「📍 地図で見る（Googleマップ）」ができます
+            </Text>
+            <Text style={styles.helpH}>🔍 探す・絞り込む</Text>
+            <Text style={styles.helpP}>
+              ・上の検索窓で、駅名・読みがな・都道府県から探せます{'\n'}
+              ・「都道府県で絞り込む」ボタンで、県ごとに表示できます{'\n'}
+              ・「都道府県別の進み具合」を開くと、県ごとの達成度が見られます。その県の駅を全部まわると完全制覇です🏆
+            </Text>
+            <Text style={styles.helpH}>💾 バックアップ（大切です）</Text>
+            <Text style={styles.helpP}>
+              ・記録はこの端末の中だけに保存されます。消えると困るので、ときどきバックアップしてください{'\n'}
+              ・書き出し：⚙設定 →「バックアップを書き出す」{'\n'}
+              ・読み込み：⚙設定 →「バックアップを読み込む」に貼り付けます（今の記録は全部入れ替わります）{'\n'}
+              ・Web版「道の駅チェックイン」と同じ形式なので、Web版のバックアップも読み込めます{'\n'}
+              ・写真そのものはバックアップに含まれません（写真は端末内に保存されます）
+            </Text>
+            <Text style={styles.helpH}>🌙 表示の切替</Text>
+            <Text style={styles.helpP}>
+              ・⚙設定でダークモードにできます。「自動」にすると端末の設定に合わせます
+            </Text>
+            <Text style={styles.helpH}>ℹ️ このアプリについて</Text>
+            <Text style={styles.helpP}>
+              ・無料・会員登録なし。記録は端末内のみで、外に送信されません{'\n'}
+              ・駅データ：国土交通省「道の駅」一覧（2026年9月4日現在・全1,234駅）{'\n'}
+              ・制作：Happy Monster Select
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
       <Modal visible={!!viewEntry} animationType="fade" onRequestClose={() => setViewEntry(null)}>
         <SafeAreaView style={styles.container}>
           <ScrollView contentContainerStyle={styles.modalBody}>
@@ -995,6 +1052,8 @@ function makeStyles(C) {
     cancelBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 6 },
     cancelText: { fontSize: 15, color: C.muted, fontWeight: '600' },
     dangerText: { fontSize: 15, color: '#e11d48', fontWeight: '700' },
+    helpH: { fontSize: 16, fontWeight: '800', color: C.text, marginTop: 18, marginBottom: 6 },
+    helpP: { fontSize: 14, color: C.text, lineHeight: 22 },
     viewMemo: { fontSize: 15, color: C.text, lineHeight: 22, marginTop: 12 },
     prefRowText: { fontSize: 16, color: C.text },
     prefRowTextActive: { fontWeight: 'bold', color: C.statNum },
