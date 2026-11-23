@@ -7,7 +7,7 @@ Web版「道の駅チェックイン」を、Expo（React Native）で作り直�
 
 1. App Storeで「Expo Go」を入れる
 2. Snackのページを開く：
-   https://snack.expo.dev/CAlOH3hbcKJgQaXhJwL5z
+   https://snack.expo.dev/G1O-a3fIMqa45xYOiDWxb
 3. ページの案内から Expo Go で開くと、自分のiPhoneで動く
 
 ## 使い方
