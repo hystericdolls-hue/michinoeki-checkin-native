@@ -363,7 +363,9 @@ export default function App() {
   }
 
   function openMap(e) {
-    Linking.openURL('https://maps.apple.com/?q=' + e.lat + ',' + e.lng).catch(() => {});
+    Linking.openURL(
+      'https://www.google.com/maps/search/?api=1&query=' + e.lat + ',' + e.lng
+    ).catch(() => {});
   }
 
   function deleteEntry(entry) {
